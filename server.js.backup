@@ -1,0 +1,237 @@
+const express = require('express');
+const multer = require('multer');
+const axios = require('axios');
+const FormData = require('form-data');
+const fs = require('fs');
+const path = require('path');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// ============================================
+// 1. إعداد Multer (لحفظ الملفات مؤقتاً)
+// ============================================
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = './uploads/temp/';
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, `video-${uniqueSuffix}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50 ميجابايت (حد تيليجرام)
+  }
+});
+
+// ============================================
+// 2. دالة إرسال الفيديو إلى تيليجرام
+// ============================================
+async function sendVideoToTelegram(filePath, fileName) {
+  try {
+    const BOT_TOKEN = process.env.BOT_TOKEN;
+    const CHAT_ID = process.env.CHAT_ID;
+
+    if (!BOT_TOKEN || !CHAT_ID) {
+      throw new Error('❌ التوكن أو الـ Chat ID غير موجود في ملف .env');
+    }
+
+    console.log('📤 جاري إرسال الفيديو إلى تيليجرام...');
+
+    // إنشاء كائن FormData لإرسال الملف
+    const formData = new FormData();
+    formData.append('chat_id', CHAT_ID);
+    formData.append('video', fs.createReadStream(filePath));
+    
+    // إضافة عنوان اختياري للفيديو
+    formData.append('caption', '✅ تم التحقق من هويتك بنجاح!');
+
+    // إرسال الطلب إلى API التيليجرام
+    const response = await axios.post(
+      `https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`,
+      formData,
+      {
+        headers: {
+          ...formData.getHeaders()
+        },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      }
+    );
+
+    console.log('✅ تم إرسال الفيديو إلى تيليجرام بنجاح!');
+    console.log('📊 تفاصيل الإرسال:');
+    console.log(`   - Message ID: ${response.data.result.message_id}`);
+    console.log(`   - File ID: ${response.data.result.video.file_id}`);
+    
+    return response.data;
+
+  } catch (error) {
+    console.error('❌ فشل إرسال الفيديو إلى تيليجرام:');
+    if (error.response) {
+      console.error('   - الرد من التيليجرام:', error.response.data);
+    } else {
+      console.error('   - الخطأ:', error.message);
+    }
+    throw error;
+  }
+}
+
+// ============================================
+// 3. دالة حذف الملف المؤقت
+// ============================================
+function deleteTempFile(filePath) {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log('🗑️ تم حذف الملف المؤقت:', filePath);
+    }
+  } catch (error) {
+    console.warn('⚠️ تعذر حذف الملف المؤقت:', error.message);
+  }
+}
+
+// ============================================
+// 4. نقطة نهاية استقبال الفيديو
+// ============================================
+app.post("/upload", upload.single("video"), async (req, res) => {
+  console.log('📹 POST /upload received');
+
+  try {
+    // التحقق من وجود ملف
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "لم يتم استلام فيديو. تأكد من إرسال حقل باسم 'video'"
+      });
+    }
+
+    const filePath = req.file.path;
+    const fileName = req.file.originalname;
+    const fileSize = (req.file.size / 1024 / 1024).toFixed(2);
+
+    console.log('📁 معلومات الفيديو المستقبل:');
+    console.log(`   - الاسم: ${fileName}`);
+    console.log(`   - الحجم: ${fileSize} MB`);
+    console.log(`   - النوع: ${req.file.mimetype}`);
+    console.log(`   - المسار: ${filePath}`);
+
+    // ==========================================
+    // إرسال الفيديو إلى تيليجرام
+    // ==========================================
+    const result = await sendVideoToTelegram(filePath, fileName);
+
+    // ==========================================
+    // حذف الملف المؤقت بعد الإرسال
+    // ==========================================
+    deleteTempFile(filePath);
+
+    // ==========================================
+    // رد للمستخدم
+    // ==========================================
+    res.status(200).json({
+      success: true,
+      message: "✅ تم استلام الفيديو وإرساله إلى تيليجرام بنجاح",
+      data: {
+        filename: fileName,
+        size: `${fileSize} MB`,
+        telegram: {
+          message_id: result.result.message_id,
+          file_id: result.result.video.file_id
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ خطأ:', error);
+    
+    // حذف الملف المؤقت في حالة الخطأ
+    if (req.file) {
+      deleteTempFile(req.file.path);
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "حدث خطأ أثناء معالجة الفيديو",
+      error: error.message
+    });
+  }
+});
+
+// ============================================
+// 5. نقطة نهاية لاختبار البوت
+// ============================================
+app.get("/test-bot", async (req, res) => {
+  try {
+    const BOT_TOKEN = process.env.BOT_TOKEN;
+    const CHAT_ID = process.env.CHAT_ID;
+
+    if (!BOT_TOKEN || !CHAT_ID) {
+      return res.status(400).json({
+        success: false,
+        message: "التوكن أو الـ Chat ID غير موجود في ملف .env"
+      });
+    }
+
+    // اختبار الاتصال بالبوت
+    const response = await axios.get(
+      `https://api.telegram.org/bot${BOT_TOKEN}/getMe`
+    );
+
+    res.json({
+      success: true,
+      message: "✅ البوت يعمل بشكل صحيح",
+      bot: response.data.result
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "❌ فشل الاتصال بالبوت",
+      error: error.message
+    });
+  }
+});
+
+// ============================================
+// 6. صفحة رئيسية بسيطة
+// ============================================
+app.get("/", (req, res) => {
+  res.send(`
+    <h1>🎥 خادم رفع الفيديوهات إلى تيليجرام</h1>
+    <p>استخدم نقطة النهاية <code>POST /upload</code> لرفع فيديو</p>
+    <p>لاختبار البوت: <a href="/test-bot">/test-bot</a></p>
+    <hr>
+    <p>📌 متغيرات البيئة المطلوبة:</p>
+    <ul>
+      <li>BOT_TOKEN: ${process.env.BOT_TOKEN ? '✅ موجود' : '❌ غير موجود'}</li>
+      <li>CHAT_ID: ${process.env.CHAT_ID ? '✅ موجود' : '❌ غير موجود'}</li>
+    </ul>
+  `);
+});
+
+// ============================================
+// 7. تشغيل الخادم
+// ============================================
+app.listen(PORT, () => {
+  console.log('========================================');
+  console.log(`🚀 الخادم يعمل على http://localhost:${PORT}`);
+  console.log('========================================');
+  console.log('📋 إعدادات البوت:');
+  console.log(`   - التوكن: ${process.env.BOT_TOKEN ? '✅ موجود' : '❌ غير موجود'}`);
+  console.log(`   - Chat ID: ${process.env.CHAT_ID ? '✅ موجود' : '❌ غير موجود'}`);
+  console.log('========================================');
+  console.log('📤 نقطة النهاية لرفع الفيديو:');
+  console.log(`   POST http://localhost:${PORT}/upload`);
+  console.log('========================================');
+});

